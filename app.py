@@ -200,8 +200,8 @@ if analyze_btn and TARGET_GENE_SYMBOL:
                             y_pos = df_plot[df_plot['Cell_Type'] == cell]['Expression'].max() * 0.95
                             ax.text(i, y_pos, sig, ha='center', va='bottom', fontsize=18, fontweight='bold')
 
-                    ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels (nRPKM)", fontsize=18, fontweight='bold', pad=15)
-                    ax.set_ylabel("Normalized Expression (nRPKM)", fontsize=16)
+                    ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels", fontsize=18, fontweight='bold', pad=15)
+                    ax.set_ylabel("Arbitrary units", fontsize=16)
                     ax.set_xlabel("Cell Type", fontsize=16)
                     
                     handles, labels = ax.get_legend_handles_labels()
