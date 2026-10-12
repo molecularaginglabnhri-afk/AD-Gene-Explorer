@@ -32,14 +32,14 @@ plt.rcParams['font.sans-serif'] = ['Arial']
 @st.cache_resource(show_spinner=False)
 def prepare_data():
     if not os.path.exists("extracted_data"):
-        # 使用您剛剛產生的 GitHub Release 網址
+        # 使用 GitHub Release 網址
         zip_url = "https://github.com/molecularaginglabnhri-afk/AD-Gene-Explorer/releases/download/v1/data.zip"
         
         # 如果壓縮檔不在，就先下載
         if not os.path.exists("data.zip"):
             try:
                 r = requests.get(zip_url, stream=True)
-                r.raise_for_status() # 檢查網址是否有效
+                r.raise_for_status()
                 with open("data.zip", "wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
@@ -150,6 +150,7 @@ def get_expression(gsm_id, target_id):
 # ==========================================
 with st.sidebar:
     st.header("Search Parameters")
+    # 將使用者輸入自動轉為大寫並去除空白
     TARGET_GENE_SYMBOL = st.text_input("Enter Gene Symbol:", value="BECN1").strip().upper()
     analyze_btn = st.button("Run Analysis 🚀")
 
@@ -159,11 +160,33 @@ if analyze_btn and TARGET_GENE_SYMBOL:
     else:
         with st.spinner(f"Querying Entrez ID for {TARGET_GENE_SYMBOL}..."):
             mg = mygene.MyGeneInfo()
-            query_res = mg.query(TARGET_GENE_SYMBOL, scopes='symbol', fields='entrezgene', species='human')
+            # 擴大搜尋範圍包含 symbol 與 alias
+            query_res = mg.query(TARGET_GENE_SYMBOL, scopes='symbol,alias', fields='entrezgene,symbol,alias', species='human')
             
-        if query_res['hits'] and 'entrezgene' in query_res['hits'][0]:
-            TARGET_ID = int(query_res['hits'][0]['entrezgene'])
-            st.success(f"Gene Found! **{TARGET_GENE_SYMBOL}** (Entrez ID: {TARGET_ID})")
+        TARGET_ID = None
+        OFFICIAL_SYMBOL = ""
+        
+        # 進行嚴格的「完全比對 (Exact Match)」
+        if query_res.get('hits'):
+            for hit in query_res['hits']:
+                if 'entrezgene' not in hit:
+                    continue
+                    
+                hit_symbol = hit.get('symbol', '').upper()
+                
+                hit_aliases = hit.get('alias', [])
+                if isinstance(hit_aliases, str):
+                    hit_aliases = [hit_aliases]
+                hit_aliases = [a.upper() for a in hit_aliases]
+                
+                if TARGET_GENE_SYMBOL == hit_symbol or TARGET_GENE_SYMBOL in hit_aliases:
+                    TARGET_ID = int(hit['entrezgene'])
+                    OFFICIAL_SYMBOL = hit.get('symbol', TARGET_GENE_SYMBOL)
+                    break
+        
+        if TARGET_ID:
+            st.success(f"Exact Match Found! **{OFFICIAL_SYMBOL}** (Entrez ID: {TARGET_ID})")
+            TARGET_GENE_SYMBOL = OFFICIAL_SYMBOL # 將標題統一替換為官方名稱
             
             with st.spinner("Extracting expression data from 113 files..."):
                 meta_df['Expression'] = meta_df['GSM_ID'].apply(lambda x: get_expression(x, TARGET_ID))
@@ -200,6 +223,7 @@ if analyze_btn and TARGET_GENE_SYMBOL:
                             y_pos = df_plot[df_plot['Cell_Type'] == cell]['Expression'].max() * 0.95
                             ax.text(i, y_pos, sig, ha='center', va='bottom', fontsize=18, fontweight='bold')
 
+                    # 更新標題與 Y 軸標籤
                     ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels", fontsize=18, fontweight='bold', pad=15)
                     ax.set_ylabel("Arbitrary units", fontsize=16)
                     ax.set_xlabel("Cell Type", fontsize=16)
@@ -214,4 +238,4 @@ if analyze_btn and TARGET_GENE_SYMBOL:
                     with st.expander("Show Raw Data Table"):
                         st.dataframe(df_plot)
         else:
-            st.error(f"Cannot find gene '{TARGET_GENE_SYMBOL}'. Please check the spelling.")
+            st.error(f"Cannot find an EXACT match for gene '{TARGET_GENE_SYMBOL}'. Please check the spelling.")
