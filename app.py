@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import ttest_ind
 import mygene
-import gdown  # 👈 新增：用來下載 Google Drive 檔案
+import zipfile
+import requests
 
 # ==========================================
 # 0. 網頁基本設定
@@ -20,37 +21,44 @@ st.markdown("""
 * **System Development & Data Processing:** Built and processed into this online explorer system by **Wendy Hsu's Lab at NHRI, Taiwan**.
 """)
 
-# 圖表全域設定
 plt.rcParams['xtick.labelsize'] = 14
 plt.rcParams['ytick.labelsize'] = 14
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['Arial']
 
 # ==========================================
-# 1. Google Drive 資料下載區塊
+# 1. 自動下載與解壓縮區塊
 # ==========================================
-DATA_DIR = "data"
-GDRIVE_FOLDER_ID = "1FWAHofVcHj832vjwO7qrTZRv5A0-fuYx" # 從您的網址萃取出的資料夾 ID
-
-# 使用 cache 確保伺服器重啟時只會下載一次
 @st.cache_resource(show_spinner=False)
-def download_data_from_gdrive():
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    
-    # 檢查資料夾內是否有足夠的檔案，若少於 113 個則觸發下載
-    existing_files = glob.glob(os.path.join(DATA_DIR, "*.tsv"))
-    if len(existing_files) < 113:
+def prepare_data():
+    if not os.path.exists("extracted_data"):
+        # 使用您剛剛產生的 GitHub Release 網址
+        zip_url = "https://github.com/molecularaginglabnhri-afk/AD-Gene-Explorer/releases/download/v1/data.zip"
+        
+        # 如果壓縮檔不在，就先下載
+        if not os.path.exists("data.zip"):
+            try:
+                r = requests.get(zip_url, stream=True)
+                r.raise_for_status() # 檢查網址是否有效
+                with open("data.zip", "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+            except Exception as e:
+                st.error(f"Download failed: {e}")
+                return False
+        
+        # 下載完後進行解壓縮
         try:
-            # gdown 會將雲端資料夾內容下載到 DATA_DIR
-            url = f"https://drive.google.com/drive/folders/{GDRIVE_FOLDER_ID}?usp=sharing"
-            gdown.download_folder(url, output=DATA_DIR, quiet=False, use_cookies=False)
+            with zipfile.ZipFile("data.zip", 'r') as zip_ref:
+                zip_ref.extractall("extracted_data")
         except Exception as e:
-            st.error(f"Failed to download data from Google Drive: {e}")
+            st.error(f"Extraction failed: {e}")
+            return False
+            
+    return True
 
-# 在頁面載入時觸發下載
-with st.spinner("Initializing database from Google Drive... This will only take a moment on the first run."):
-    download_data_from_gdrive()
+with st.spinner("Downloading and extracting dataset (approx. 31MB)... This will only take a moment on the first run."):
+    data_ready = prepare_data()
 
 # ==========================================
 # 2. 參數與資料集設定 (113個樣本)
@@ -118,16 +126,14 @@ sample_list = [
 meta_df = pd.DataFrame(sample_list, columns=["GSM_ID", "ID", "Group", "Cell_Type"])
 
 # ==========================================
-# 3. 核心分析函數 (讀取已下載的檔案)
+# 3. 核心分析函數 (從解壓縮出來的檔案中搜尋)
 # ==========================================
 def get_expression(gsm_id, target_id):
-    # 支援尋找下載到 data 裡的檔案
-    search_path = os.path.join(DATA_DIR, f"{gsm_id}*.tsv")
-    
-    # gdown 下載資料夾時，有時會建立多一層子資料夾，所以加個遞迴搜尋保障
-    files = glob.glob(search_path)
-    if not files:
-        files = glob.glob(os.path.join(DATA_DIR, "**", f"{gsm_id}*.tsv"), recursive=True)
+    if not data_ready:
+        return None
+        
+    search_path = os.path.join("extracted_data", "**", f"{gsm_id}*.tsv")
+    files = glob.glob(search_path, recursive=True)
         
     if not files:
         return None
@@ -148,67 +154,64 @@ with st.sidebar:
     analyze_btn = st.button("Run Analysis 🚀")
 
 if analyze_btn and TARGET_GENE_SYMBOL:
-    with st.spinner(f"Querying Entrez ID for {TARGET_GENE_SYMBOL}..."):
-        mg = mygene.MyGeneInfo()
-        query_res = mg.query(TARGET_GENE_SYMBOL, scopes='symbol', fields='entrezgene', species='human')
-        
-    if query_res['hits'] and 'entrezgene' in query_res['hits'][0]:
-        TARGET_ID = int(query_res['hits'][0]['entrezgene'])
-        st.success(f"Gene Found! **{TARGET_GENE_SYMBOL}** (Entrez ID: {TARGET_ID})")
-        
-        with st.spinner("Extracting expression data..."):
-            meta_df['Expression'] = meta_df['GSM_ID'].apply(lambda x: get_expression(x, TARGET_ID))
-            
-            df_plot = meta_df.dropna(subset=['Expression']).copy()
-            df_plot['Expression'] = pd.to_numeric(df_plot['Expression'])
-            
-            if df_plot.empty:
-                st.error("No expression data found. Ensure files were successfully downloaded from Google Drive.")
-            else:
-                # 繪圖區塊
-                fig, ax = plt.subplots(figsize=(12, 7))
-                sns.set_style("ticks")
-
-                # 自訂顏色：Control 為白色，AD 為紅色
-                custom_colors = {"Control": "#FFFFFF", "AD": "#FF0000"}
-                
-                # 畫柱狀圖 (加上黑色邊框避免白色柱體消失)
-                sns.barplot(data=df_plot, x="Cell_Type", y="Expression", hue="Group", 
-                            palette=custom_colors, edgecolor=".2", capsize=.1, errorbar=('ci', 95), ax=ax)
-                
-                # 加上個別樣本點
-                sns.stripplot(data=df_plot, x="Cell_Type", y="Expression", hue="Group", 
-                              dodge=True, color="black", alpha=0.5, size=5, legend=False, ax=ax)
-
-                # 統計檢定與標記
-                cell_types = df_plot['Cell_Type'].unique()
-                for i, cell in enumerate(cell_types):
-                    ctrl = df_plot[(df_plot['Cell_Type'] == cell) & (df_plot['Group'] == 'Control')]['Expression']
-                    ad = df_plot[(df_plot['Cell_Type'] == cell) & (df_plot['Group'] == 'AD')]['Expression']
-                    
-                    if len(ctrl) > 1 and len(ad) > 1:
-                        t_stat, p_val = ttest_ind(ctrl, ad)
-                        if p_val < 0.001: sig = "***"
-                        elif p_val < 0.01: sig = "**"
-                        elif p_val < 0.05: sig = "*"
-                        else: sig = "ns"
-                        
-                        y_pos = df_plot[df_plot['Cell_Type'] == cell]['Expression'].max() * 0.95
-                        ax.text(i, y_pos, sig, ha='center', va='bottom', fontsize=18, fontweight='bold')
-
-                ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels (nRPKM)", fontsize=18, fontweight='bold', pad=15)
-                ax.set_ylabel("Normalized Expression (nRPKM)", fontsize=16)
-                ax.set_xlabel("Cell Type", fontsize=16)
-                
-                # 整理圖例
-                handles, labels = ax.get_legend_handles_labels()
-                ax.legend(handles[:2], labels[:2], title="Condition", frameon=False, fontsize=12, title_fontsize=14)
-                sns.despine()
-                plt.tight_layout()
-                
-                st.pyplot(fig)
-                
-                with st.expander("Show Raw Data Table"):
-                    st.dataframe(df_plot)
+    if not data_ready:
+        st.error("System is still preparing the dataset or failed to download it. Please try again.")
     else:
-        st.error(f"Cannot find gene '{TARGET_GENE_SYMBOL}'. Please check the spelling.")
+        with st.spinner(f"Querying Entrez ID for {TARGET_GENE_SYMBOL}..."):
+            mg = mygene.MyGeneInfo()
+            query_res = mg.query(TARGET_GENE_SYMBOL, scopes='symbol', fields='entrezgene', species='human')
+            
+        if query_res['hits'] and 'entrezgene' in query_res['hits'][0]:
+            TARGET_ID = int(query_res['hits'][0]['entrezgene'])
+            st.success(f"Gene Found! **{TARGET_GENE_SYMBOL}** (Entrez ID: {TARGET_ID})")
+            
+            with st.spinner("Extracting expression data from 113 files..."):
+                meta_df['Expression'] = meta_df['GSM_ID'].apply(lambda x: get_expression(x, TARGET_ID))
+                
+                df_plot = meta_df.dropna(subset=['Expression']).copy()
+                df_plot['Expression'] = pd.to_numeric(df_plot['Expression'])
+                
+                if df_plot.empty:
+                    st.error("No expression data found. Ensure TSV files are inside data.zip.")
+                else:
+                    fig, ax = plt.subplots(figsize=(12, 7))
+                    sns.set_style("ticks")
+
+                    custom_colors = {"Control": "#FFFFFF", "AD": "#FF0000"}
+                    
+                    sns.barplot(data=df_plot, x="Cell_Type", y="Expression", hue="Group", 
+                                palette=custom_colors, edgecolor=".2", capsize=.1, errorbar=('ci', 95), ax=ax)
+                    
+                    sns.stripplot(data=df_plot, x="Cell_Type", y="Expression", hue="Group", 
+                                  dodge=True, color="black", alpha=0.5, size=5, legend=False, ax=ax)
+
+                    cell_types = df_plot['Cell_Type'].unique()
+                    for i, cell in enumerate(cell_types):
+                        ctrl = df_plot[(df_plot['Cell_Type'] == cell) & (df_plot['Group'] == 'Control')]['Expression']
+                        ad = df_plot[(df_plot['Cell_Type'] == cell) & (df_plot['Group'] == 'AD')]['Expression']
+                        
+                        if len(ctrl) > 1 and len(ad) > 1:
+                            t_stat, p_val = ttest_ind(ctrl, ad)
+                            if p_val < 0.001: sig = "***"
+                            elif p_val < 0.01: sig = "**"
+                            elif p_val < 0.05: sig = "*"
+                            else: sig = "ns"
+                            
+                            y_pos = df_plot[df_plot['Cell_Type'] == cell]['Expression'].max() * 0.95
+                            ax.text(i, y_pos, sig, ha='center', va='bottom', fontsize=18, fontweight='bold')
+
+                    ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels (nRPKM)", fontsize=18, fontweight='bold', pad=15)
+                    ax.set_ylabel("Normalized Expression (nRPKM)", fontsize=16)
+                    ax.set_xlabel("Cell Type", fontsize=16)
+                    
+                    handles, labels = ax.get_legend_handles_labels()
+                    ax.legend(handles[:2], labels[:2], title="Condition", frameon=False, fontsize=12, title_fontsize=14)
+                    sns.despine()
+                    plt.tight_layout()
+                    
+                    st.pyplot(fig)
+                    
+                    with st.expander("Show Raw Data Table"):
+                        st.dataframe(df_plot)
+        else:
+            st.error(f"Cannot find gene '{TARGET_GENE_SYMBOL}'. Please check the spelling.")
