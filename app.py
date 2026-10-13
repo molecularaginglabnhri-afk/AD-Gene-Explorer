@@ -21,8 +21,8 @@ st.markdown("""
 * **System Development & Data Processing:** Built and processed into this online explorer system by **Wendy Hsu's Lab at NHRI, Taiwan**.
 """)
 
-plt.rcParams['xtick.labelsize'] = 14
-plt.rcParams['ytick.labelsize'] = 14
+plt.rcParams['xtick.labelsize'] = 20
+plt.rcParams['ytick.labelsize'] = 20
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['Arial']
 
