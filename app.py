@@ -124,6 +124,7 @@ sample_list = [
 ]
 
 meta_df = pd.DataFrame(sample_list, columns=["GSM_ID", "ID", "Group", "Cell_Type"])
+meta_df['Cell_Type'] = meta_df['Cell_Type'].str.capitalize()
 
 # ==========================================
 # 3. 核心分析函數 (從解壓縮出來的檔案中搜尋)
