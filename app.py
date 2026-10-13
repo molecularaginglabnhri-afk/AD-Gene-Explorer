@@ -225,11 +225,11 @@ if analyze_btn and TARGET_GENE_SYMBOL:
 
                     # 更新標題與 Y 軸標籤
                     ax.set_title(f"{TARGET_GENE_SYMBOL} Expression Levels", fontsize=18, fontweight='bold', pad=15)
-                    ax.set_ylabel("Arbitrary units", fontsize=16)
-                    ax.set_xlabel("Cell Type", fontsize=16)
+                    ax.set_ylabel("Arbitrary units", fontsize=20)
+                    ax.set_xlabel("Cell Type", fontsize=20)
                     
                     handles, labels = ax.get_legend_handles_labels()
-                    ax.legend(handles[:2], labels[:2], title="Condition", frameon=False, fontsize=12, title_fontsize=14)
+                    ax.legend(handles[:2], labels[:2], title="Condition", frameon=False, fontsize=20, title_fontsize=20)
                     sns.despine()
                     plt.tight_layout()
                     
